@@ -87,9 +87,9 @@ manifestBytes := vc.ManifestPayload
 manifestSig   := vc.ManifestCaSignature
 ```
 
-+- In **AUTO** mode, `EnsureEnrolled` returns immediately in one round-trip.
-+- In **QUEUE** mode, it holds open the `/p2p-auth/adopt/1.0.0` stream until an administrator clicks **Approve** in the Web Admin UI or runs `p2p-auth-server adopt approve`.
-+- Upon approval, the credential is automatically written to `StateDir/credential.zkp` (`0600`), so subsequent boots bypass network adoption entirely.
+- In **AUTO** mode, `EnsureEnrolled` returns immediately in one round-trip.
+- In **QUEUE** mode, it holds open the `/p2p-auth/adopt/1.0.0` stream until an administrator clicks **Approve** in the Web Admin UI or runs `p2p-auth-server adopt approve`.
+- Upon approval, the credential is automatically written to `StateDir/credential.zkp` (`0600`), so subsequent boots bypass network adoption entirely.
 
 ---
 
