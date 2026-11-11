@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>p2p-auth — ZK-VC & Adoption Appliance</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Admin Login Overlay -->
+    <div id="login-overlay" class="modal-overlay">
+        <div class="glass-card modal-card">
+            <h2>p2p-auth Admin</h2>
+            <p class="subtitle">Enter the server Admin Token to manage PSK adoption, Verifiable Credentials, and SMT epoch revocations.</p>
+            <form id="login-form">
+                <label for="admin-token-input">Admin Bearer Token</label>
+                <input type="password" id="admin-token-input" placeholder="Enter admin token..." required autocomplete="off">
+                <div id="login-error" class="error-banner hidden">Invalid admin token</div>
+                <button type="submit" id="login-btn" class="btn btn-primary full-width">Authenticate</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Approve Pending Node Modal -->
+    <div id="approve-modal" class="modal-overlay hidden">
+        <div class="glass-card modal-card wide">
+            <h3>Approve Node & Issue Verifiable Credential</h3>
+            <p class="subtitle">Sign the opaque application manifest with ML-DSA-87 and insert the node into the Poseidon Sparse Merkle Tree.</p>
+            <form id="approve-form">
+                <input type="hidden" id="approve-peer-id">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Peer ID (Subject DID)</label>
+                        <input type="text" id="approve-peer-display" readonly class="mono">
+                    </div>
+                    <div class="form-group">
+                        <label>Namespace</label>
+                        <input type="text" id="approve-namespace" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>ML-DSA-87 Domain Context</label>
+                    <input type="text" id="approve-domain-context" placeholder="p2p-auth:manifest:v1" class="mono">
+                </div>
+                <div class="form-group">
+                    <label>Opaque Manifest Payload (supports {{PEER_ID}} and {{SUBJECT_ID}})</label>
+                    <textarea id="approve-manifest" rows="4" class="mono" required></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="approve-cancel-btn" class="btn btn-ghost">Cancel</button>
+                    <button type="submit" id="approve-submit-btn" class="btn btn-success">Approve & Sign</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Manual Enroll Modal -->
+    <div id="enroll-modal" class="modal-overlay hidden">
+        <div class="glass-card modal-card wide">
+            <h3>Manual Verifiable Credential Issuance</h3>
+            <form id="enroll-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Peer ID</label>
+                        <input type="text" id="enroll-peer-id" placeholder="12D3KooW..." class="mono" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Subject ID / Hostname</label>
+                        <input type="text" id="enroll-subject-id" placeholder="node-01">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Namespace</label>
+                        <input type="text" id="enroll-namespace" placeholder="p2p-anycast" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Domain Context</label>
+                        <input type="text" id="enroll-domain-context" value="p2p-auth:manifest:v1" class="mono">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Opaque Manifest Payload</label>
+                    <textarea id="enroll-manifest" rows="4" class="mono" placeholder='{"peer":"{{PEER_ID}}"}' required></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" id="enroll-cancel-btn" class="btn btn-ghost">Cancel</button>
+                    <button type="submit" id="enroll-submit-btn" class="btn btn-primary">Mint Credential</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <div class="logo-badge">ZK</div>
+                <div>
+                    <h2>p2p-auth</h2>
+                    <span class="badge-sub">ZK-VC Appliance</span>
+                </div>
+            </div>
+
+            <nav class="nav-links">
+                <button class="nav-btn active" data-tab="adoption" id="tab-btn-adoption">
+                    Adoption & PSKs
+                    <span id="pending-badge" class="pill-count">0</span>
+                </button>
+                <button class="nav-btn" data-tab="nodes" id="tab-btn-nodes">
+                    Enrolled Nodes
+                    <span id="active-nodes-badge" class="pill-count">0</span>
+                </button>
+                <button class="nav-btn" data-tab="events" id="tab-btn-events">
+                    Real-Time Audit
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="kv-box">
+                    <span class="label">CA Key Fingerprint</span>
+                    <span id="ca-key-id-val" class="value mono">-</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <header class="top-bar">
+                <div class="top-bar-stats">
+                    <div class="header-stat">
+                        <span class="stat-label">Epoch ID</span>
+                        <span id="epoch-id-val" class="stat-value accent-cyan">0</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="stat-label">Poseidon SMT Root</span>
+                        <span id="merkle-root-val" class="stat-value mono">-</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="stat-label">Active Credentials</span>
+                        <span id="active-count-val" class="stat-value">0</span>
+                    </div>
+                    <div class="header-stat">
+                        <span class="stat-label">Swarm Peers</span>
+                        <span id="swarm-peers-val" class="stat-value">0</span>
+                    </div>
+                </div>
+                <div class="top-bar-actions">
+                    <button id="rotate-epoch-btn" class="btn btn-outline">Rotate Epoch</button>
+                </div>
+            </header>
+
+            <div class="view-viewport">
+                <!-- TAB 1: Adoption & PSKs -->
+                <section id="view-adoption" class="tab-view active">
+                    <div class="grid-two">
+                        <!-- Pending Adoption Queue -->
+                        <div class="glass-card">
+                            <div class="card-header">
+                                <h3>Pending First-Boot Adoptions</h3>
+                                <span class="hint">Nodes waiting on /p2p-auth/adopt/1.0.0</span>
+                            </div>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Subject / Peer ID</th>
+                                            <th>Namespace</th>
+                                            <th>Keystore Tier</th>
+                                            <th>Requested Manifest</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pending-table-body">
+                                        <tr><td colspan="5" class="empty-row">No pending node adoptions</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- PSK Generator -->
+                        <div class="glass-card">
+                            <div class="card-header">
+                                <h3>Create Adoption PSK</h3>
+                                <span class="hint">Mint scoped AUTO or QUEUE pre-shared keys</span>
+                            </div>
+                            <form id="psk-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="psk-namespace">Namespace</label>
+                                        <input type="text" id="psk-namespace" placeholder="p2p-anycast" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="psk-mode">Adoption Mode</label>
+                                        <select id="psk-mode">
+                                            <option value="QUEUE">QUEUE (Interactive Approval)</option>
+                                            <option value="AUTO">AUTO (Zero-Touch Template)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="psk-domain-context">ML-DSA-87 Domain Context</label>
+                                        <input type="text" id="psk-domain-context" value="p2p-auth:manifest:v1" class="mono">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="psk-max-uses">Max Uses</label>
+                                        <input type="number" id="psk-max-uses" value="10" min="1">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="psk-ttl-hours">TTL (Hours)</label>
+                                        <input type="number" id="psk-ttl-hours" value="24" min="1">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="psk-template">Opaque Manifest Template ({{PEER_ID}}, {{SUBJECT_ID}})</label>
+                                    <textarea id="psk-template" rows="2" class="mono" placeholder='{{PEER_ID}}|10.200.0.5/24 or {"peer":"{{PEER_ID}}"}'></textarea>
+                                </div>
+                                <div class="form-check">
+                                    <input type="checkbox" id="psk-require-hw">
+                                    <label for="psk-require-hw">Require Hardware Keystore Tier (TPM 2.0 / Secure Enclave)</label>
+                                </div>
+                                <button type="submit" id="create-psk-btn" class="btn btn-primary full-width">Generate PSK Token</button>
+                            </form>
+
+                            <div id="generated-psk-box" class="token-reveal hidden">
+                                <span class="label">Generated One-Time PSK Token:</span>
+                                <code id="generated-psk-val" class="mono"></code>
+                            </div>
+
+                            <div class="card-header mt-16">
+                                <h4>Active Adoption PSKs</h4>
+                            </div>
+                            <div class="table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>PSK ID</th>
+                                            <th>Namespace</th>
+                                            <th>Mode</th>
+                                            <th>Uses</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="psks-table-body">
+                                        <tr><td colspan="5" class="empty-row">No PSKs registered</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 2: Enrolled Nodes & Revocation -->
+                <section id="view-nodes" class="tab-view">
+                    <div class="glass-card">
+                        <div class="card-header">
+                            <div>
+                                <h3>Enrolled Verifiable Credentials & Revocation</h3>
+                                <span class="hint">Revoking a node zeros its Poseidon SMT leaf and immediately broadcasts a new Epoch Root to the swarm</span>
+                            </div>
+                            <div class="filter-bar">
+                                <input type="text" id="filter-namespace" placeholder="Filter namespace...">
+                                <button id="open-enroll-modal-btn" class="btn btn-primary">+ Manual Issue VC</button>
+                            </div>
+                        </div>
+                        <div class="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Serial</th>
+                                        <th>Subject / Peer ID</th>
+                                        <th>Namespace</th>
+                                        <th>Leaf Index</th>
+                                        <th>Claims Commitment</th>
+                                        <th>Opaque Manifest</th>
+                                        <th>Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="nodes-table-body">
+                                    <tr><td colspan="8" class="empty-row">No enrolled credentials</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- TAB 3: Real-Time Audit Events -->
+                <section id="view-events" class="tab-view">
+                    <div class="glass-card">
+                        <div class="card-header">
+                            <h3>Live Server-Sent Events (SSE) Audit Stream</h3>
+                        </div>
+                        <div id="events-log" class="log-terminal mono"></div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

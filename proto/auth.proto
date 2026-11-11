@@ -1,0 +1,104 @@
+ syntax = "proto3";
+package p2pauth.v1;
+option go_package = "github.com/kevinpthorne/p2p-auth/pkg/proto/auth;auth";
+
+enum AdoptionState {
+  ADOPTION_PENDING = 0;
+  ADOPTION_APPROVED = 1;
+  ADOPTION_REJECTED = 2;
+}
+
+// AdoptionRequest is sent by a first-boot node using a Pre-Shared Key (PSK)
+// without any pre-existing signed manifest files.
+message AdoptionRequest {
+  string namespace = 1;           // Application/cluster namespace, e.g. "p2p-anycast", "p2p-vpn"
+  string peer_id = 2;             // Holder Subject did:p2p:<peer_id> derived from hardware key
+  bytes pub_key = 3;              // Protobuf-marshaled libp2p public key
+  string keystore_tier = 4;       // "TPM2.0", "AppleSecureEnclave", or "Filesystem"
+  string subject_id = 5;          // Node hostname / logical identifier
+  bytes requested_manifest = 6;   // Optional opaque credential_subject payload requested by node
+  string domain_context = 7;      // Optional ML-DSA-87 signing context string override
+  int64 timestamp = 8;            // Unix timestamp (seconds)
+  bytes nonce = 9;                // 32-byte CSPRNG challenge nonce
+  bytes pop_signature = 10;       // Hardware anchor key signature over adoption transcript
+  string psk_id = 11;             // Identifier of the Pre-Shared Key
+  bytes psk_hmac = 12;            // 32-byte HMAC-SHA256(psk_secret, transcript)
+}
+
+message AdoptionResponse {
+  AdoptionState state = 1;
+  string status_message = 2;
+  VerifiableCredential credential = 3; // Populated immediately when state == ADOPTION_APPROVED
+}
+
+// EnrollmentRequest is sent by nodes already holding a CA-signed opaque payload.
+message EnrollmentRequest {
+  string namespace = 1;           // Application/cluster namespace
+  string peer_id = 2;             // Node libp2p Peer ID
+  string domain_context = 3;      // ML-DSA-87 signing context used by the app's CA
+  bytes manifest_payload = 4;     // Opaque signed payload bytes (protobuf, JSON, pipe-delimited, etc.)
+  bytes ca_signature = 5;         // 4,627-byte ML-DSA-87 CA signature over manifest_payload
+  int64 timestamp = 6;            // Unix timestamp (seconds)
+  bytes pop_signature = 7;        // Node key signature over (namespace || peer_id || sha256(manifest_payload) || timestamp)
+}
+
+// VerifiableCredential is issued by p2p-auth-server and persisted by the Holder as credential.zkp.
+message VerifiableCredential {
+  string id = 1;                      // "urn:uuid:<uuid>" credential identifier
+  string issuer = 2;                  // "did:p2p:<ca_key_id>"
+  string subject = 3;                 // "did:p2p:<peer_id>"
+  string namespace = 4;               // Application domain scope
+  uint64 serial_number = 5;           // Unique credential serial
+  int64 not_before = 6;               // validFrom Unix timestamp
+  int64 not_after = 7;                // validUntil Unix timestamp
+  bytes manifest_payload = 8;         // credentialSubject: opaque application manifest/claims bytes
+  bytes claims_commitment = 9;        // 32-byte PoseidonBytes(manifest_payload)
+  bytes credential_secret = 10;       // 32-byte holder secret BN254 field element for ZKP witness
+  uint64 epoch_id = 11;               // credentialStatus: SMT epoch at issuance
+  bytes epoch_root = 12;              // 32-byte Poseidon SMT root
+  uint32 leaf_index = 13;             // credentialStatus: SMT leaf index for revocation tracking
+  repeated bytes merkle_siblings = 14;// 20 sibling hashes for SMT inclusion witness
+  uint32 path_directions = 15;        // 20-bit direction bitmask
+  bytes manifest_ca_signature = 16;   // proof: 4,627-byte ML-DSA-87 CA signature over manifest_payload
+  bytes epoch_signature = 17;         // CA signature over EpochBroadcast
+  string domain_context = 18;         // ML-DSA-87 domain context used for manifest_ca_signature
+}
+
+message EpochBroadcast {
+  uint64 epoch_id = 1;
+  bytes merkle_root = 2;
+  int64 timestamp = 3;
+  int64 valid_until = 4;
+  uint32 active_credentials = 5;
+  bytes ca_pubkey = 6;
+  bytes signature = 7;
+}
+
+// VerifiablePresentation is presented during peer-to-peer or verification swarm handshakes.
+message VerifiablePresentation {
+  uint64 epoch_id = 1;
+  string namespace = 2;
+  string peer_id = 3;                 // holder: "did:p2p:<peer_id>"
+  bytes claims_commitment = 4;        // 32-byte PoseidonBytes(manifest_payload) or 32 zero bytes for ZK mode
+  bytes session_challenge = 5;        // 32-byte verifier challenge nonce
+  bytes challenge_tag = 6;            // 32-byte Poseidon(credential_secret, session_challenge)
+  int64 timestamp = 7;
+  bytes groth16_proof = 8;            // Compressed BN254 Groth16 ZK proof
+}
+
+message AuthReceipt {
+  bytes receipt_id = 1;               // 16 bytes UUID
+  string namespace = 2;
+  string peer_id = 3;
+  bytes claims_commitment = 4;
+  uint64 epoch_id = 5;
+  int64 expires_at = 6;
+  string verifier_peer_id = 7;
+  bytes verifier_signature = 8;       // Ed25519 signature by swarm verifier
+}
+
+message VerifyResponse {
+  bool valid = 1;
+  string error_message = 2;
+  AuthReceipt receipt = 3;
+}
